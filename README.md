@@ -6,7 +6,7 @@
 A Node.js implementation of RTMP/HTTP/WebSocket Media Server 
 
 # Features
- - High performance RTMP parser based on ES6 Generator implementation
+ - High performance RTMP parser based on async function
  - Cross platform support Windows/Linux/Unix
  - Support H.264/H.265/AAC/SPEEX/NELLYMOSER
  - Support GOP cache
