@@ -10,8 +10,8 @@ A Node.js implementation of RTMP/HTTP/WebSocket Media Server
  - Cross platform support Windows/Linux/Unix
  - Support H.264/H.265/AAC/SPEEX/NELLYMOSER
  - Support GOP cache
- - Support remux to LIVE-HTTP-FLV,Support [flv.js](https://github.com/Bilibili/flv.js) playback
- - Support remux to LIVE-WebSocket-FLV,Support [flv.js](https://github.com/Bilibili/flv.js) playback
+ - Support remux to LIVE HTTP-FLV/WebSocket-FLV , Support [flv.js](https://github.com/Bilibili/flv.js) playback
+ - Support remux to LIVE HTTP-H264/WebSocket-H264 , Support [Broadway.js](https://github.com/mbebenita/Broadway) playback, support iOS realtime
  - Support xycdn style authentication
  - Support event callback
  - Support https/wss
