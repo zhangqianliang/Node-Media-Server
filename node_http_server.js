@@ -11,6 +11,7 @@ const WebSocket = require('ws');
 const Express = require('express');
 const NodeCoreUtils = require('./node_core_utils');
 const NodeFlvSession = require('./node_flv_session');
+const NodeH264Session = require('./node_h264_session');
 const HTTP_PORT = 80;
 const HTTPS_PORT = 443;
 
@@ -30,7 +31,7 @@ class NodeHttpServer {
     this.nodeEvent = NodeCoreUtils.nodeEvent;
 
     this.expressApp = Express();
-    this.expressApp.all('*.flv', (req, res, next) => {
+    this.expressApp.all(['*.flv', '*.h264'], (req, res, next) => {
       if (req.method === 'OPTIONS') {
         res.setHeader('Access-Control-Allow-Origin', this.config.http.allow_origin);
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -155,7 +156,7 @@ class NodeHttpServer {
 
   onConnect(req, res) {
     let id = NodeCoreUtils.generateNewSessionID(this.sessions);
-    let session = new NodeFlvSession(this.config, req, res);
+    let session = req.url.endsWith('.flv') ? new NodeFlvSession(this.config, req, res) : new NodeH264Session(this.config, req, res);
     this.sessions.set(id, session);
     session.id = id;
     session.sessions = this.sessions;

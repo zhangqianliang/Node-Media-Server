@@ -12,6 +12,7 @@ const AMF = require('./node_core_amf');
 const Handshake = require('./node_rtmp_handshake');
 const BufferPool = require('./node_core_bufferpool');
 const NodeFlvSession = require('./node_flv_session');
+const NodeH264Session = require('./node_h264_session');
 const NodeCoreUtils = require('./node_core_utils');
 
 
@@ -628,6 +629,7 @@ class NodeRtmpSession extends EventEmitter {
           this.videoLevel = info.level;
           this.rtmpGopCacheQueue = this.gopCacheEnable ? new Set() : null;
           this.flvGopCacheQueue = this.gopCacheEnable ? new Set() : null;
+          this.h264GopCacheQueue = this.gopCacheEnable ? new Set() : null;
         }
       } else {
         this.isFirstVideoReceived = true;
@@ -638,17 +640,19 @@ class NodeRtmpSession extends EventEmitter {
 
     let rtmpMessage = this.createRtmpMessage(rtmpHeader, rtmpBody);
     let flvMessage = NodeFlvSession.createFlvMessage(rtmpHeader, rtmpBody);
-
+    let h264Message = NodeH264Session.createH264Message(rtmpHeader, rtmpBody);
     if ((codec_id == 7 || codec_id == 12) && this.rtmpGopCacheQueue != null) {
       if (frame_type == 1 && rtmpBody[1] == 1) {
         this.rtmpGopCacheQueue.clear();
         this.flvGopCacheQueue.clear();
+        this.h264GopCacheQueue.clear();
       }
       if (frame_type == 1 && rtmpBody[1] == 0) {
         //skip avc sequence header
       } else {
         this.rtmpGopCacheQueue.add(rtmpMessage);
         this.flvGopCacheQueue.add(flvMessage);
+        this.h264GopCacheQueue.add(h264Message);
       }
     }
 
@@ -659,6 +663,10 @@ class NodeRtmpSession extends EventEmitter {
         session.socket.write(rtmpMessage);
       } else if (session instanceof NodeFlvSession) {
         session.res.write(flvMessage, null, (e) => {
+          //websocket will throw a error if not set the cb when closed
+        });
+      } else if (session instanceof NodeH264Session) {
+        session.res.write(h264Message, null, (e) => {
           //websocket will throw a error if not set the cb when closed
         });
       }
