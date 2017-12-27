@@ -10,10 +10,9 @@ const { AUDIO_SOUND_RATE, AUDIO_CODEC_NAME, VIDEO_CODEC_NAME } = require('./node
 
 const AMF = require('./node_core_amf');
 const Handshake = require('./node_rtmp_handshake');
-const BufferPool = require('./node_core_bufferpool');
+const NodeCoreStream = require('./node_core_stream');
 const NodeFlvSession = require('./node_flv_session');
 const NodeCoreUtils = require('./node_core_utils');
-
 
 const EXTENDED_TIMESTAMP_TYPE_NOT_USED = 'not-used';
 const EXTENDED_TIMESTAMP_TYPE_ABSOLUTE = 'absolute';
@@ -36,7 +35,7 @@ class NodeRtmpSession extends EventEmitter {
     super();
     this.TAG = 'rtmp';
     this.config = config;
-    // this.bp = new BufferPool(this.handleData());
+    this.bs = new NodeCoreStream(socket);
     this.nodeEvent = NodeCoreUtils.nodeEvent;
     this.socket = socket;
     this.players = null;
@@ -50,7 +49,7 @@ class NodeRtmpSession extends EventEmitter {
     this.pingInterval = null;
     this.socket.setTimeout(this.pingTimeout); //Use nodejs network timeout mechanism 
 
-    this.isStarting = false;
+    this.isReject = false;
     this.isPublishing = false;
     this.isPlaying = false;
     this.isIdling = false;
@@ -97,33 +96,192 @@ class NodeRtmpSession extends EventEmitter {
     this.on('closeStream', this.onCloseStream);
     this.on('deleteStream', this.onDeleteStream);
 
-    // this.socket.on('data', this.onSocketData.bind(this));
     this.socket.on('close', this.onSocketClose.bind(this));
     this.socket.on('error', this.onSocketError.bind(this));
     this.socket.on('timeout', this.onSocketTimeout.bind(this));
   }
 
-  run() {
-    this.isStarting = true;
-    // this.bp.init();
-    this.handleData();
+  async run() {
+    do {
+      try {
+        console.log('[rtmp handshake] start');
+        let c0c1 = await this.bs.read(1537);
+        let s0s1s2 = Handshake.generateS0S1S2(c0c1);
+        this.bs.write(s0s1s2);
+        let c2 = await this.bs.read(1536);
+        console.log('[rtmp handshake] done');
+      } catch (error) {
+        console.log('[rtmp handshake] error', error);
+        break;
+      }
+
+      try {
+        console.log('[rtmp message parser] start');
+        while (!this.isReject) {
+          let message = {};
+          let chunkMessageHeader = null;
+          let previousChunk = null;
+
+          let chunkBasicHeader = await this.bs.read(1);
+          message.formatType = chunkBasicHeader[0] >> 6;
+          message.chunkStreamID = chunkBasicHeader[0] & 0x3F;
+          if (message.chunkStreamID === 0) {
+            // Chunk basic header 2 64-319
+            let exCSID = await this.bs.read(1);
+            message.chunkStreamID = exCSID[0] + 64;
+          } else if (message.chunkStreamID === 1) {
+            // Chunk basic header 3 64-65599
+            let exCSID = await this.bs.read(2);
+            message.chunkStreamID = (exCSID[1] << 8) + exCSID[0] + 64;
+          } else {
+            // Chunk basic header 1  2-63
+          }
+          previousChunk = this.previousChunkMessage[message.chunkStreamID];
+          if (message.formatType === 0) {
+            //Type 0 (11 bytes)
+            chunkMessageHeader = await this.bs.read(11);
+            message.timestamp = chunkMessageHeader.readUIntBE(0, 3);
+            if (message.timestamp === 0xffffff) {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_ABSOLUTE;
+            } else {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
+            }
+            message.timestampDelta = 0;
+            message.messageLength = chunkMessageHeader.readUIntBE(3, 3);
+            message.messageTypeID = chunkMessageHeader[6];
+            message.messageStreamID = chunkMessageHeader.readUInt32LE(7);
+            message.receivedLength = 0;
+            message.chunks = [];
+          } else if (message.formatType === 1) {
+            //Type 1 (7 bytes)
+            chunkMessageHeader = await this.bs.read(7);
+            message.timestampDelta = chunkMessageHeader.readUIntBE(0, 3);
+            if (message.timestampDelta === 0xffffff) {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_DELTA;
+            } else {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
+            }
+            message.messageLength = chunkMessageHeader.readUIntBE(3, 3);
+            message.messageTypeID = chunkMessageHeader[6];
+            if (previousChunk != null) {
+              message.timestamp = previousChunk.timestamp;
+              message.messageStreamID = previousChunk.messageStreamID;
+              message.receivedLength = previousChunk.receivedLength;
+              message.chunks = previousChunk.chunks;
+            } else {
+              console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
+              break;
+            }
+          } else if (message.formatType === 2) {
+            // Type 2 (3 bytes)
+            chunkMessageHeader = await this.bs.read(3);
+            message.timestampDelta = chunkMessageHeader.readUIntBE(0, 3);
+            if (message.timestampDelta === 0xffffff) {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_DELTA;
+            } else {
+              message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
+            }
+            if (previousChunk != null) {
+              message.timestamp = previousChunk.timestamp;
+              message.messageStreamID = previousChunk.messageStreamID;
+              message.messageLength = previousChunk.messageLength;
+              message.messageTypeID = previousChunk.messageTypeID;
+              message.receivedLength = previousChunk.receivedLength;
+              message.chunks = previousChunk.chunks;
+            } else {
+              console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
+              break;
+            }
+          } else if (message.formatType == 3) {
+            // Type 3 (0 byte)
+            if (previousChunk != null) {
+              message.timestamp = previousChunk.timestamp;
+              message.messageStreamID = previousChunk.messageStreamID;
+              message.messageLength = previousChunk.messageLength;
+              message.timestampDelta = previousChunk.timestampDelta;
+              message.messageTypeID = previousChunk.messageTypeID;
+              message.receivedLength = previousChunk.receivedLength;
+              message.chunks = previousChunk.chunks;
+            } else {
+              console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
+              break;
+            }
+          } else {
+            console.error("Unknown format type: " + message.formatType);
+            break;
+          }
+
+          if (message.extendedTimestampType === EXTENDED_TIMESTAMP_TYPE_ABSOLUTE) {
+            let extTimestamp = await this.bs.read(4);
+            message.timestamp = extTimestamp.readUInt32BE();
+          } else if (message.extendedTimestampType === EXTENDED_TIMESTAMP_TYPE_DELTA) {
+            let extTimestamp = await this.bs.read(4);
+            message.timestampDelta = extTimestamp.readUInt32BE();
+          }
+
+          let chunkBodySize = message.messageLength;
+          chunkBodySize -= message.receivedLength;
+          chunkBodySize = Math.min(chunkBodySize, this.inChunkSize);
+
+          let chunkBody = await this.bs.read(chunkBodySize);
+          message.receivedLength += chunkBodySize;
+          message.chunks.push(chunkBody);
+          if (message.receivedLength == message.messageLength) {
+            if (message.timestampDelta != null) {
+              message.timestamp += message.timestampDelta;
+              if (message.timestamp > TIMESTAMP_ROUNDOFF) {
+                message.timestamp %= TIMESTAMP_ROUNDOFF;
+              }
+            }
+            let rtmpBody = Buffer.concat(message.chunks);
+            this.handleRTMPMessage(message, rtmpBody);
+            message.receivedLength = 0;
+            message.chunks = [];
+            rtmpBody = null;
+          }
+          this.previousChunkMessage[message.chunkStreamID] = message;
+
+          if (this.bs.readBytes >= 0xf0000000) {
+            this.bs.readBytes = 0;
+            this.inLastAck = 0;
+          }
+          if (this.ackSize > 0 && this.bs.readBytes - this.inLastAck >= this.ackSize) {
+            this.inLastAck = this.bs.readBytes;
+            this.sendACK(this.bs.readBytes);
+          }
+        }
+        console.log('[rtmp message parser] done');
+      } catch (error) {
+        console.log('[rtmp message parser] error');
+        break;
+      }
+    } while (0);
+    this.onCloseStream(this.playStreamId);
+    this.onCloseStream(this.publishStreamId);
+
+    if (this.pingInterval != null) {
+      clearImmediate(this.pingInterval);
+      this.pingInterval = null;
+    }
+    this.nodeEvent.emit('doneConnect', this.id, this.connectCmdObj);
+    this.socket.destroy();
+    this.sessions.delete(this.id);
+    this.idlePlayers = null;
+    this.publishers = null;
+    this.sessions = null;
+
   }
 
   stop() {
-    if (this.isStarting) {
-      this.isStarting = false;
-      // this.bp.stop();
-      this.reject('stop');
-    }
+    this.bs.stop();
   }
 
-  reject() {
-    this.isStarting = false;
+  reject(msg = '') {
+    this.isReject = true;
+    console.log(`[session ${this.id}] is rejected ${msg}`);
+    this.stop();
   }
 
-  onSocketData(data) {
-    this.bp.push(data);
-  }
 
   onSocketError(e) {
     // console.log(`[rtmp socket error] id:${this.id}`,e);
@@ -138,187 +296,6 @@ class NodeRtmpSession extends EventEmitter {
   onSocketTimeout() {
     // console.log(`[rtmp socket timeout] id:${this.id}`);
     this.stop();
-  }
-
-  async handleData() {
-    console.log('[rtmp handshake] start');
-
-    try {
-
-
-      let c0c1 = await this.readChunk(1537);
-      let s0s1s2 = Handshake.generateS0S1S2(c0c1);
-      this.socket.write(s0s1s2);
-      let c2 = await this.readChunk(1536);
-      console.log('[rtmp handshake] done');
-      console.log('[rtmp message parser] start');
-      // this.bp.readBytes = 0;
-      while (this.isStarting) {
-        let message = {};
-        let chunkMessageHeader = null;
-        let previousChunk = null;
-
-        let chunkBasicHeader = await this.readChunk(1);
-        message.formatType = chunkBasicHeader[0] >> 6;
-        message.chunkStreamID = chunkBasicHeader[0] & 0x3F;
-        if (message.chunkStreamID === 0) {
-          // Chunk basic header 2 64-319
-          let exCSID = await this.readChunk(1);
-          message.chunkStreamID = exCSID[0] + 64;
-        } else if (message.chunkStreamID === 1) {
-          // Chunk basic header 3 64-65599
-          let exCSID = await this.readChunk(2);
-          message.chunkStreamID = (exCSID[1] << 8) + exCSID[0] + 64;
-        } else {
-          // Chunk basic header 1  2-63
-        }
-        previousChunk = this.previousChunkMessage[message.chunkStreamID];
-        if (message.formatType === 0) {
-          //Type 0 (11 bytes)
-          chunkMessageHeader = await this.readChunk(11);
-          message.timestamp = chunkMessageHeader.readUIntBE(0, 3);
-          if (message.timestamp === 0xffffff) {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_ABSOLUTE;
-          } else {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
-          }
-          message.timestampDelta = 0;
-          message.messageLength = chunkMessageHeader.readUIntBE(3, 3);
-          message.messageTypeID = chunkMessageHeader[6];
-          message.messageStreamID = chunkMessageHeader.readUInt32LE(7);
-          message.receivedLength = 0;
-          message.chunks = [];
-        } else if (message.formatType === 1) {
-          //Type 1 (7 bytes)
-          chunkMessageHeader = await this.readChunk(7);
-          message.timestampDelta = chunkMessageHeader.readUIntBE(0, 3);
-          if (message.timestampDelta === 0xffffff) {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_DELTA;
-          } else {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
-          }
-          message.messageLength = chunkMessageHeader.readUIntBE(3, 3);
-          message.messageTypeID = chunkMessageHeader[6];
-          if (previousChunk != null) {
-            message.timestamp = previousChunk.timestamp;
-            message.messageStreamID = previousChunk.messageStreamID;
-            message.receivedLength = previousChunk.receivedLength;
-            message.chunks = previousChunk.chunks;
-          } else {
-            console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
-            break;
-          }
-        } else if (message.formatType === 2) {
-          // Type 2 (3 bytes)
-          chunkMessageHeader = await this.readChunk(3);
-          message.timestampDelta = chunkMessageHeader.readUIntBE(0, 3);
-          if (message.timestampDelta === 0xffffff) {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_DELTA;
-          } else {
-            message.extendedTimestampType = EXTENDED_TIMESTAMP_TYPE_NOT_USED;
-          }
-          if (previousChunk != null) {
-            message.timestamp = previousChunk.timestamp;
-            message.messageStreamID = previousChunk.messageStreamID;
-            message.messageLength = previousChunk.messageLength;
-            message.messageTypeID = previousChunk.messageTypeID;
-            message.receivedLength = previousChunk.receivedLength;
-            message.chunks = previousChunk.chunks;
-          } else {
-            console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
-            break;
-          }
-        } else if (message.formatType == 3) {
-          // Type 3 (0 byte)
-          if (previousChunk != null) {
-            message.timestamp = previousChunk.timestamp;
-            message.messageStreamID = previousChunk.messageStreamID;
-            message.messageLength = previousChunk.messageLength;
-            message.timestampDelta = previousChunk.timestampDelta;
-            message.messageTypeID = previousChunk.messageTypeID;
-            message.receivedLength = previousChunk.receivedLength;
-            message.chunks = previousChunk.chunks;
-          } else {
-            console.error(`Chunk reference error for type ${message.formatType}: previous chunk for id ${message.chunkStreamID} is not found`);
-            break;
-          }
-        } else {
-          console.error("Unknown format type: " + message.formatType);
-          break;
-        }
-
-        if (message.extendedTimestampType === EXTENDED_TIMESTAMP_TYPE_ABSOLUTE) {
-          let extTimestamp = await this.readChunk(4);
-          message.timestamp = extTimestamp.readUInt32BE();
-        } else if (message.extendedTimestampType === EXTENDED_TIMESTAMP_TYPE_DELTA) {
-          let extTimestamp = await this.readChunk(4);
-          message.timestampDelta = extTimestamp.readUInt32BE();
-        }
-
-        let chunkBodySize = message.messageLength;
-        chunkBodySize -= message.receivedLength;
-        chunkBodySize = Math.min(chunkBodySize, this.inChunkSize);
-
-        let chunkBody = await this.readChunk(chunkBodySize);
-        message.receivedLength += chunkBodySize;
-        message.chunks.push(chunkBody);
-        if (message.receivedLength == message.messageLength) {
-          if (message.timestampDelta != null) {
-            message.timestamp += message.timestampDelta;
-            if (message.timestamp > TIMESTAMP_ROUNDOFF) {
-              message.timestamp %= TIMESTAMP_ROUNDOFF;
-            }
-          }
-          let rtmpBody = Buffer.concat(message.chunks);
-          this.handleRTMPMessage(message, rtmpBody);
-          message.receivedLength = 0;
-          message.chunks = [];
-          rtmpBody = null;
-        }
-        this.previousChunkMessage[message.chunkStreamID] = message;
-
-        // if (this.bp.readBytes >= 0xf0000000) {
-        //   this.bp.readBytes = 0;
-        //   this.inLastAck = 0;
-        // }
-        // if (this.ackSize > 0 && this.bp.readBytes - this.inLastAck >= this.ackSize) {
-        //   this.inLastAck = this.bp.readBytes;
-        //   this.sendACK(this.bp.readBytes);
-        // }
-      }
-    } catch (error) {
-      console.error(error);
-    }
-    console.log('[rtmp message parser] done');
-
-    this.onCloseStream(this.playStreamId);
-    this.onCloseStream(this.publishStreamId);
-
-    if (this.pingInterval != null) {
-      clearImmediate(this.pingInterval);
-      this.pingInterval = null;
-    }
-    this.nodeEvent.emit('doneConnect', this.id, this.connectCmdObj);
-    this.socket.destroy();
-    this.sessions.delete(this.id);
-    this.idlePlayers = null;
-    this.publishers = null;
-    this.sessions = null;
-  }
-
-  readChunk(size) {
-    return new Promise((resolve, reject) => {
-      const onReadable = () => {
-        let chunk = this.socket.read(size);
-        if (chunk != null) {
-          this.socket.removeListener('readable', onReadable)
-          resolve(chunk)
-        }
-      }
-
-      this.socket.on('readable', onReadable)
-      onReadable()
-    });
   }
 
   createChunkBasicHeader(fmt, id) {
@@ -804,7 +781,7 @@ class NodeRtmpSession extends EventEmitter {
   onConnect(cmdObj) {
     cmdObj.app = cmdObj.app.replace('/', '');
     this.nodeEvent.emit('preConnect', this.id, cmdObj);
-    if (!this.isStarting) {
+    if (this.isReject) {
       return;
     }
     this.connectCmdObj = cmdObj;
@@ -825,7 +802,7 @@ class NodeRtmpSession extends EventEmitter {
 
   onPublish() {
     this.nodeEvent.emit('prePublish', this.id, this.publishStreamPath, this.publishArgs);
-    if (!this.isStarting) {
+    if (this.isReject) {
       return;
     }
     if (this.config.auth !== undefined && this.config.auth.publish) {
@@ -862,7 +839,7 @@ class NodeRtmpSession extends EventEmitter {
 
   onPlay() {
     this.nodeEvent.emit('prePlay', this.id, this.playStreamPath, this.playArgs);
-    if (!this.isStarting) {
+    if (this.isReject) {
       return;
     }
     if (this.config.auth !== undefined && this.config.auth.play) {
