@@ -84,10 +84,12 @@ class NodeHttpServer {
 
     this.wsServer = new WebSocket.Server({ server: this.httpServer });
 
-    this.wsServer.on('connection', (ws, req) => {
+    const onWSConnect = (ws, req) => {
       req.nmsConnectionType = 'ws';
       this.onConnect(req, ws);
-    });
+    };
+
+    this.wsServer.on('connection', onWSConnect.bind(this));
 
     this.wsServer.on('listening', () => {
       console.log(`Node Media WebSocket Server started on port: ${this.port}`);
@@ -111,10 +113,7 @@ class NodeHttpServer {
 
       this.wssServer = new WebSocket.Server({ server: this.httpsServer });
 
-      this.wssServer.on('connection', (ws, req) => {
-        req.nmsConnectionType = 'ws';
-        this.onConnect(req, ws);
-      });
+      this.wssServer.on('connection', onWSConnect.bind(this));
 
       this.wssServer.on('listening', () => {
         console.log(`Node Media WebSocketSecure Server started on port: ${this.sport}`);
