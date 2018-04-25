@@ -168,4 +168,4 @@ class NodeHttpServer {
   }
 }
 
-module.exports = NodeHttpServer
+module.exports = NodeHttpServer;

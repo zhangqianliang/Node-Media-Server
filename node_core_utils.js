@@ -12,10 +12,10 @@ function generateNewSessionID() {
     const possible = 'ABCDEFGHIJKLMNOPQRSTUVWKYZ0123456789';
     const numPossible = possible.length;
     do {
-        for (var i = 0; i < 8; i++) {
+        for (let i = 0; i < 8; i++) {
             sessionID += possible.charAt((Math.random() * numPossible) | 0);
         }
-    } while (context.sessions.has(sessionID))
+    } while (context.sessions.has(sessionID));
     return sessionID;
 }
 
@@ -23,7 +23,7 @@ function genRandomName() {
     let name = '';
     const possible = 'abcdefghijklmnopqrstuvwxyz0123456789';
     const numPossible = possible.length;
-    for (var i = 0; i < 4; i++) {
+    for (let i = 0; i < 4; i++) {
         name += possible.charAt((Math.random() * numPossible) | 0);
     }
 

@@ -1,0 +1,41 @@
+{
+    "logType": 3,
+    "server": {
+        "center_url": "http://nscloud.z.cn/",
+        "local_url": "192.168.100.115"
+    },
+    "rtmp": {
+        "port": 11935,
+        "chunk_size": 60000,
+        "gop_cache": true,
+        "ping": 60,
+        "ping_timeout": 30
+    },
+    "http": {
+        "port": 8020,
+        "webroot": "./public",
+        "mediaroot": "./media",
+        "allow_origin": "*"
+    },
+    "trans": {
+        "ffmpeg": "/usr/local/bin/ffmpeg",
+        "tasks": [
+            {
+                "app": "live",
+                "ac": "aac",
+                "hls": true,
+                "hlsFlags": "[hls_time=6:hls_list_size=3:hls_flags=delete_segments]"
+            }
+        ]
+    },
+    "https": {
+        "port": 8443,
+        "key": "./privatekey.pem",
+        "cert": "./certificate.pem"
+    },
+    "auth": {
+        "play": false,
+        "publish": false,
+        "secret": "nodemedia2017privatekey"
+    }
+}
