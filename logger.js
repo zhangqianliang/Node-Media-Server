@@ -17,7 +17,7 @@ const setLogType = (type) => {
 
 const logTime = () => {
     let nowDate = new Date();
-    return nowDate.toLocaleDateString() + ' ' + nowDate.toLocaleTimeString([], { hour12: false });
+    return nowDate.toLocaleDateString() + ' ' + nowDate.toLocaleTimeString([], {hour12: false});
 };
 
 const log = (...args) => {

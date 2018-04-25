@@ -113,7 +113,7 @@ function amf3decUndefined() {
  */
 function amf3encUndefined() {
     const buf = new Buffer(1);
-    buf.writeUInt8(0x00);
+    buf.writeUInt8(0x00, 0);
     return buf;
 }
 

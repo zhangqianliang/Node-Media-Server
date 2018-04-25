@@ -13,6 +13,7 @@ class NodeSyncServer {
         this.pullIntervalEvent = setInterval(function (func, that) {
             func(that);
         }, 10000, NodeSyncServer.fetchLiveStreams, this);
+        Logger.log(`Node Media Sync Server started`);
     }
 
     stop() {
@@ -32,11 +33,13 @@ class NodeSyncServer {
         try {
             const response = await axios.get(url, {
                 params: {
-                    local_server: localServer
+                    local_server: localServer,
+                    local_rtmp_port: that.config.rtmp.port,
+                    local_http_port: that.config.http.port
                 }
             });
             if (response.status >= 200 && response.status < 300) {
-                Logger.log(`Node Sync Server sync center server data: ${JSON.stringify(response.data)}`);
+                Logger.debug(`Node Sync Server sync center server data: ${JSON.stringify(response.data)}`);
                 const liveStreams = response.data.data.live_streams;
                 if (liveStreams !== undefined && liveStreams.length > 0) {
                     // setup pull streams

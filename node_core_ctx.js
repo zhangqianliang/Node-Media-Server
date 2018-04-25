@@ -10,8 +10,8 @@ let publishers = new Map();
 let idlePlayers = new Set();
 let nodeEvent = new EventEmitter();
 let stat = {
-  inbytes: 0,
-  outbytes: 0,
-  accepted: 0
+    inbytes: 0,
+    outbytes: 0,
+    accepted: 0
 };
-module.exports = { sessions, publishers, idlePlayers, nodeEvent, stat };
+module.exports = {sessions, publishers, idlePlayers, nodeEvent, stat};

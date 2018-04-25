@@ -262,7 +262,7 @@ class NodeRtmpSession {
         }
     }
 
-    rtmpChunkBasicHeaderCreate(fmt, cid) {
+    static rtmpChunkBasicHeaderCreate(fmt, cid) {
         let out;
         if (cid >= 64 + 255) {
             out = Buffer.alloc(3);
@@ -280,7 +280,7 @@ class NodeRtmpSession {
         return out;
     }
 
-    rtmpChunkMessageHeaderCreate(header) {
+    static rtmpChunkMessageHeaderCreate(header) {
         let out = Buffer.alloc(rtmpHeaderSize[header.fmt % 4]);
         if (header.fmt <= RTMP_CHUNK_TYPE_2) {
             out.writeUIntBE(header.timestamp >= 0xffffff ? 0xffffff : header.timestamp, 0, 3);
@@ -305,9 +305,9 @@ class NodeRtmpSession {
         let chunksOffset = 0;
         let payloadOffset = 0;
 
-        let chunkBasicHeader = this.rtmpChunkBasicHeaderCreate(header.fmt, header.cid);
-        let chunkBasicHeader3 = this.rtmpChunkBasicHeaderCreate(RTMP_CHUNK_TYPE_3, header.cid);
-        let chunkMessageHeader = this.rtmpChunkMessageHeaderCreate(header);
+        let chunkBasicHeader = NodeRtmpSession.rtmpChunkBasicHeaderCreate(header.fmt, header.cid);
+        let chunkBasicHeader3 = NodeRtmpSession.rtmpChunkBasicHeaderCreate(RTMP_CHUNK_TYPE_3, header.cid);
+        let chunkMessageHeader = NodeRtmpSession.rtmpChunkMessageHeaderCreate(header);
         let useExtendedTimestamp = header.timestamp >= 0xffffff;
         let headerSize = chunkBasicHeader.length + chunkMessageHeader.length + (useExtendedTimestamp ? 4 : 0);
 
@@ -650,7 +650,7 @@ class NodeRtmpSession {
                     this.avcSequenceHeader = Buffer.alloc(payload.length);
                     payload.copy(this.avcSequenceHeader);
                     let info = AV.readAVCSpecificConfig(this.avcSequenceHeader);
-                    Logger.error('[rtmp handleVideoMessage ]', info);
+                    Logger.debug('[rtmp handleVideoMessage ]', info);
                     if (this.videoWidth === 0 || this.videoHeight === 0) {
                         this.videoWidth = info.width;
                         this.videoHeight = info.height;
